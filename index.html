@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DiscoNER: discontinuous entity annotator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#eef1f5; --panel:#ffffff; --ink:#1c2230; --muted:#596377; --rule:#d7dce5;
+  --accent:#2b59c3; --accent-ink:#ffffff; --soft:#f5f7fa;
+  --ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --read:"Source Serif 4",Georgia,"Times New Roman",serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#131720; --panel:#1b202b; --ink:#e5e8ee; --muted:#9aa3b5; --rule:#2d3443;
+    --accent:#86a7f4; --accent-ink:#0f1420; --soft:#222836;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);font-size:15px}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,label:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+
+header{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem;padding:.8rem 1.4rem;background:var(--panel);border-bottom:1px solid var(--rule)}
+header h1{font-family:var(--read);font-weight:600;font-size:1.35rem;margin:0 1rem 0 0;letter-spacing:-.01em}
+header h1 span{font-family:var(--ui);font-weight:400;font-size:.85rem;color:var(--muted);margin-left:.5rem}
+.tools{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+.btn{border:1px solid var(--rule);background:var(--panel);border-radius:6px;padding:.4rem .75rem;font-size:.9rem}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn:disabled{opacity:.4;cursor:default}
+.file-name{color:var(--muted);font-size:.85rem}
+
+main{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:1.2rem;padding:1.2rem 1.4rem;max-width:1280px;margin:0 auto}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+
+#docwrap{position:relative;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:2.2rem 2.4rem 2.4rem}
+#doc{font-family:var(--read);font-size:1.15rem;line-height:2.95;white-space:pre-wrap;max-width:68ch;position:relative;z-index:1}
+#arcs{position:absolute;left:0;top:0;pointer-events:none;z-index:2;overflow:visible}
+.seg.ann{cursor:pointer;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.chip{display:inline-block;user-select:none;-webkit-user-select:none;font-family:var(--ui);font-size:.68rem;font-weight:600;line-height:1;padding:.2rem .35rem;margin:0 .15rem;border-radius:4px;background:var(--c);color:#fff;vertical-align:.35em;cursor:pointer}
+.chip sub{font-weight:400;opacity:.85;margin-left:.15rem;vertical-align:baseline;font-size:.9em}
+.chip.on{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--c)}
+.empty{font-family:var(--ui);line-height:1.6;color:var(--muted);padding:3rem 0;text-align:center}
+.empty strong{display:block;color:var(--ink);font-size:1.1rem;margin-bottom:.4rem}
+
+aside{display:flex;flex-direction:column;gap:1rem}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:1rem}
+.panel h2{font-size:.95rem;font-weight:600;margin:0 0 .7rem}
+.panel h2 small{font-weight:400;color:var(--muted)}
+.hint{color:var(--muted);font-size:.86rem;line-height:1.5;margin:.3rem 0 0}
+
+.type-row{display:flex;align-items:center;gap:.5rem;padding:.25rem 0}
+.sw{width:.8rem;height:.8rem;border-radius:3px;flex:none;background:var(--c)}
+.type-row .count{margin-left:auto;color:var(--muted);font-size:.85rem}
+.x{border:none;background:none;color:var(--muted);padding:0 .2rem;font-size:1rem;line-height:1}
+.x:hover{color:var(--ink)}
+.add-type{display:flex;gap:.4rem;margin-top:.6rem}
+.add-type input[type=text]{flex:1;min-width:0;border:1px solid var(--rule);background:var(--soft);color:var(--ink);border-radius:6px;padding:.35rem .5rem;font:inherit;font-size:.9rem}
+.add-type input[type=color]{width:2.2rem;height:2rem;border:1px solid var(--rule);border-radius:6px;padding:2px;background:var(--soft)}
+
+.ent-list{list-style:none;margin:0;padding:0;max-height:300px;overflow:auto}
+.ent-list li{display:flex;align-items:center;gap:.4rem}
+.ent-item{flex:1;min-width:0;display:flex;align-items:center;gap:.5rem;text-align:left;border:none;background:none;padding:.35rem .4rem;border-radius:6px}
+.ent-item:hover{background:var(--soft)}
+.ent-item.on{background:var(--soft);box-shadow:inset 3px 0 0 var(--c)}
+.ent-item .id{font-size:.75rem;color:var(--muted);width:1.9rem;flex:none}
+.ent-item .txt{font-family:var(--read);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.type-btns{display:flex;flex-wrap:wrap;gap:.35rem}
+.tbtn{border:1px solid var(--c);background:transparent;border-radius:999px;padding:.2rem .65rem;font-size:.85rem}
+.tbtn.on,.tbtn:hover{background:var(--c);color:#fff}
+.frag{display:flex;align-items:center;gap:.5rem;padding:.3rem 0;border-top:1px solid var(--rule)}
+.frag:first-child{border-top:none}
+.frag .ft{font-family:var(--read);flex:1}
+.frag .rng{font-size:.75rem;color:var(--muted)}
+.label{font-size:.8rem;color:var(--muted);margin:.8rem 0 .35rem}
+.danger{margin-top:.9rem;border:1px solid #c23b3b;color:#c23b3b;background:none;border-radius:6px;padding:.35rem .7rem;font-size:.88rem}
+.danger:hover{background:#c23b3b;color:#fff}
+
+#pop{position:fixed;z-index:20;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:.7rem;min-width:230px;max-width:330px;box-shadow:0 8px 24px rgba(15,20,32,.18);display:none}
+#pop .pv{font-family:var(--read);font-size:.95rem;margin-bottom:.55rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pop .addto{width:100%;margin-bottom:.6rem;border:1px solid var(--c);background:var(--c);color:#fff;border-radius:6px;padding:.4rem .6rem;text-align:left}
+#pop .cancel{margin-top:.55rem;border:none;background:none;color:var(--muted);padding:0;font-size:.85rem}
+
+#toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--ink);color:var(--panel);padding:.5rem .9rem;border-radius:6px;font-size:.88rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30}
+#toast.show{opacity:1}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>DiscoNER<span>discontinuous entity annotator</span></h1>
+  <div class="tools">
+    <label class="btn primary" tabindex="0" title="Open a .txt, a .json, or a CADEC .txt + .ann pair (select both)">Open file<input id="file" type="file" accept=".txt,.json,.ann" multiple hidden></label>
+    <button class="btn" id="example">Load example</button>
+    <button class="btn" id="undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button class="btn" id="redo" title="Redo (Ctrl+Y)">Redo</button>
+    <button class="btn" id="download">Download JSON</button>
+    <button class="btn" id="downloadAnn" title="Download in BRAT .ann format (same format as CADEC)">Download .ann</button>
+  </div>
+  <span class="file-name" id="fname"></span>
+</header>
+
+<main>
+  <section id="docwrap" aria-label="Document">
+    <div id="doc"></div>
+    <svg id="arcs" aria-hidden="true"></svg>
+  </section>
+  <aside>
+    <div class="panel" id="selPanel"></div>
+    <div class="panel">
+      <h2>Entity types</h2>
+      <div id="types"></div>
+      <div class="add-type">
+        <input type="text" id="newType" placeholder="New type name" aria-label="New type name">
+        <input type="color" id="newColor" value="#c2418f" aria-label="New type color">
+        <button class="btn" id="addType">Add</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Entities <small id="entCount"></small></h2>
+      <ul class="ent-list" id="ents"></ul>
+    </div>
+  </aside>
+</main>
+
+<div id="pop" role="dialog" aria-label="Annotate selection"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const DEFAULT_TYPES = [
+  {name:'ADR', color:'#d64545'}, {name:'Drug', color:'#2f6fde'}, {name:'Disease', color:'#8a4fd8'},
+  {name:'Symptom', color:'#d9900b'}, {name:'Finding', color:'#12937f'}
+];
+const PALETTE = ['#d64545','#2f6fde','#8a4fd8','#d9900b','#12937f','#c2418f','#5a8f29','#b8662a'];
+
+let state = {text:'', types:[], entities:[], nextId:1, fileName:''};
+let selectedId = null, hoverId = null, pending = null;
+let undoStack = [], redoStack = [], segEls = [];
+const $ = s => document.querySelector(s);
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const escAttr = s => esc(s).replace(/"/g,'&quot;');
+
+/* ---------- model ---------- */
+function typeColor(name){ const t = state.types.find(t => t.name === name); return t ? t.color : '#888888'; }
+function entText(e){ return sortSpans(e.spans).map(([s,t]) => state.text.slice(s,t)).join(' … '); }
+function sortSpans(sp){ return [...sp].sort((a,b) => a[0]-b[0]); }
+function normSpans(sp){
+  const out = [];
+  for (const [s,e] of sortSpans(sp)){
+    const last = out[out.length-1];
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e); else out.push([s,e]);
+  }
+  return out;
+}
+function getEnt(id){ return state.entities.find(e => e.id === id); }
+
+function snapshot(){ return JSON.stringify({types:state.types, entities:state.entities, nextId:state.nextId}); }
+function commit(){ undoStack.push(snapshot()); if (undoStack.length > 300) undoStack.shift(); redoStack = []; }
+function restore(s){
+  const o = JSON.parse(s);
+  state.types = o.types; state.entities = o.entities; state.nextId = o.nextId;
+  if (!getEnt(selectedId)) selectedId = null;
+  render();
+}
+function undo(){ if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); toast('Undone'); }
+function redo(){ if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); toast('Redone'); }
+
+function createEntity(type, span){
+  commit();
+  const id = 'T' + state.nextId++;
+  state.entities.push({id, type, spans:[span]});
+  selectedId = id; render(); toast(`Created ${id} (${type})`);
+}
+function addFragment(id, span){
+  const e = getEnt(id); if (!e) return;
+  commit(); e.spans = normSpans([...e.spans, span]);
+  render(); toast(`Added a fragment to ${id}`);
+}
+function removeFragment(id, idx){
+  const e = getEnt(id); if (!e) return;
+  if (e.spans.length === 1) return deleteEntity(id);
+  commit(); e.spans = sortSpans(e.spans); e.spans.splice(idx,1);
+  render(); toast(`Removed a fragment from ${id}`);
+}
+function deleteEntity(id){
+  commit(); state.entities = state.entities.filter(e => e.id !== id);
+  if (selectedId === id) selectedId = null;
+  render(); toast(`Deleted ${id}`);
+}
+function changeType(id, type){
+  const e = getEnt(id); if (!e || e.type === type) return;
+  commit(); e.type = type; render(); toast(`${id} is now ${type}`);
+}
+function addType(name, color){
+  name = name.trim();
+  if (!name) return toast('Type a name for the new entity type');
+  if (state.types.some(t => t.name.toLowerCase() === name.toLowerCase())) return toast(`${name} already exists`);
+  commit(); state.types.push({name, color}); render(); toast(`Added type ${name}`);
+}
+function removeType(name){
+  if (state.entities.some(e => e.type === name)) return toast(`${name} is still in use`);
+  commit(); state.types = state.types.filter(t => t.name !== name); render();
+}
+
+/* ---------- loading and saving ---------- */
+function loadDoc(text, entities, types, fileName){
+  state = {text, types, entities, nextId:1, fileName};
+  const nums = entities.map(e => parseInt(String(e.id).replace(/\D/g,''),10)).filter(n => !isNaN(n));
+  state.nextId = (nums.length ? Math.max(...nums) : 0) + 1;
+  selectedId = null; hoverId = null; undoStack = []; redoStack = [];
+  render();
+}
+
+function parseJSONDoc(obj){
+  const text = obj.text ?? obj.document;
+  if (typeof text !== 'string') throw new Error('The JSON file needs a "text" field with the document text.');
+  let types = [];
+  if (Array.isArray(obj.entity_types)){
+    types = obj.entity_types.map((t,i) => typeof t === 'string'
+      ? {name:t, color:PALETTE[i % PALETTE.length]}
+      : {name:t.name, color:/^#[0-9a-f]{6}$/i.test(t.color||'') ? t.color : PALETTE[i % PALETTE.length]});
+  } else types = DEFAULT_TYPES.map(t => ({...t}));
+  const raw = obj.entities || obj.annotations || [];
+  const entities = []; let skipped = 0, auto = 1;
+  for (const r of raw){
+    const type = r.type || r.label || r.entity_type;
+    let spans = r.spans || r.offsets || (r.start != null ? [[r.start, r.end]] : null);
+    if (!type || !Array.isArray(spans)){ skipped++; continue; }
+    spans = spans.map(s => Array.isArray(s) ? [Number(s[0]), Number(s[1])] : [Number(s.start), Number(s.end)]);
+    if (!spans.length || spans.some(([s,e]) => !(s >= 0 && e > s && e <= text.length))){ skipped++; continue; }
+    if (!types.some(t => t.name === type)) types.push({name:type, color:PALETTE[types.length % PALETTE.length]});
+    entities.push({id: r.id ? String(r.id) : 'T' + (auto++), type, spans:normSpans(spans), ...(r.note ? {note:String(r.note)} : {})});
+  }
+  const ids = new Set();
+  entities.forEach((e,i) => { if (ids.has(e.id)) e.id = e.id + '_' + i; ids.add(e.id); });
+  return {text, entities, types, skipped};
+}
+
+function exportJSON(){
+  return {
+    text: state.text,
+    entity_types: state.types,
+    entities: state.entities.map(e => {
+      const spans = sortSpans(e.spans);
+      return {id:e.id, type:e.type, spans, fragments: spans.map(([s,t]) => state.text.slice(s,t)),
+              text: entText(e), discontinuous: spans.length > 1, ...(e.note ? {note:e.note} : {})};
+    })
+  };
+}
+
+/* BRAT standoff format, used by CADEC:
+   T1<TAB>ADR 9 19<TAB>bit drowsy             continuous entity
+   T9<TAB>ADR 9 19;25 30<TAB>bit ... weird    discontinuous entity (fragments separated by ;)
+   #1<TAB>AnnotatorNotes T1<TAB>Drowsy        note attached to an entity */
+function parseBrat(text, ann){
+  const types = DEFAULT_TYPES.map(t => ({...t}));
+  const entities = [], notes = {};
+  let skipped = 0, mismatched = 0;
+  for (const line of ann.split(/\r?\n/)){
+    if (!line.trim()) continue;
+    const cols = line.split('\t');
+    if (/^T\d+$/.test(cols[0]) && cols.length >= 2){
+      const info = cols[1].trim(), sp = info.indexOf(' ');
+      const type = info.slice(0, sp);
+      const spans = info.slice(sp + 1).split(';').map(p => p.trim().split(/\s+/).map(Number));
+      if (!type || spans.some(s => s.length !== 2 || !(s[0] >= 0 && s[1] > s[0] && s[1] <= text.length))){ skipped++; continue; }
+      if (cols[2] != null){
+        const want = cols[2].replace(/\s+/g,' ').trim();
+        const got = spans.map(([s,e]) => text.slice(s,e)).join(' ').replace(/\s+/g,' ').trim();
+        if (want !== got) mismatched++;
+      }
+      if (!types.some(t => t.name === type)) types.push({name:type, color:PALETTE[types.length % PALETTE.length]});
+      entities.push({id:cols[0], type, spans:normSpans(spans)});
+    } else if (/^#\d+$/.test(cols[0]) && cols[1] && cols[1].startsWith('AnnotatorNotes')){
+      const target = cols[1].split(/\s+/)[1];
+      if (target) notes[target] = (cols[2] || '').trim();
+    }
+  }
+  entities.forEach(e => { if (notes[e.id]) e.note = notes[e.id]; });
+  return {text, entities, types, skipped, mismatched};
+}
+
+function exportBrat(){
+  const lines = [];
+  [...state.entities].sort((a,b) => sortSpans(a.spans)[0][0] - sortSpans(b.spans)[0][0]).forEach((e,i) => {
+    const spans = sortSpans(e.spans);
+    const frag = spans.map(([s,t]) => state.text.slice(s,t).replace(/\s+/g,' ')).join(' ');
+    lines.push(`${e.id}\t${e.type} ${spans.map(([s,t]) => s + ' ' + t).join(';')}\t${frag}`);
+    if (e.note) lines.push(`#${i+1}\tAnnotatorNotes ${e.id}\t${e.note}`);
+  });
+  return lines.join('\n') + '\n';
+}
+
+function saveFile(content, name, mime){
+  const blob = new Blob([content], {type:mime});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('Downloaded ' + name);
+}
+const baseName = () => (state.fileName || 'document').replace(/\.(txt|json|ann)$/i,'');
+function download(){
+  if (!state.text) return toast('Open a document first');
+  saveFile(JSON.stringify(exportJSON(), null, 2), baseName() + '_annotated.json', 'application/json');
+}
+function downloadAnn(){
+  if (!state.text) return toast('Open a document first');
+  saveFile(exportBrat(), baseName() + '.ann', 'text/plain');
+}
+
+$('#file').addEventListener('change', async ev => {
+  const files = [...ev.target.files]; ev.target.value = '';
+  if (!files.length) return;
+  const byExt = ext => files.find(f => f.name.toLowerCase().endsWith(ext));
+  const json = byExt('.json'), txt = byExt('.txt'), ann = byExt('.ann');
+  try {
+    if (json){
+      const d = parseJSONDoc(JSON.parse(await json.text()));
+      loadDoc(d.text, d.entities, d.types, json.name);
+      toast(`Loaded ${d.entities.length} entities` + (d.skipped ? `, skipped ${d.skipped} invalid` : ''));
+    } else if (txt && ann){
+      const d = parseBrat(await txt.text(), await ann.text());
+      loadDoc(d.text, d.entities, d.types, txt.name);
+      let msg = `Loaded ${d.entities.length} CADEC entities`;
+      if (d.skipped) msg += `, skipped ${d.skipped} with invalid offsets`;
+      if (d.mismatched) msg += `, ${d.mismatched} with text that differs from the offsets`;
+      toast(msg);
+    } else if (ann && state.text){
+      const d = parseBrat(state.text, await ann.text());
+      loadDoc(d.text, d.entities, d.types, state.fileName);
+      toast(`Applied ${d.entities.length} entities from ${ann.name}`);
+    } else if (ann){
+      toast('Select the .txt file together with the .ann file (hold Cmd to select both)');
+    } else if (txt){
+      loadDoc(await txt.text(), [], DEFAULT_TYPES.map(t => ({...t})), txt.name);
+      toast('Loaded ' + txt.name);
+    } else toast('Choose a .txt, .json, or .txt + .ann pair');
+  } catch (err){ toast(err instanceof SyntaxError ? 'That file is not valid JSON' : err.message); }
+});
+
+function loadExample(){
+  const text = "I took Lipitor for about three months for high cholesterol. Within weeks I had severe pain in my legs and arms, and my left knee was stiff and swollen most mornings. I also had trouble sleeping and felt tired all day. My doctor lowered the dose and the muscle cramps finally stopped.";
+  const at = s => { const i = text.indexOf(s); return [i, i + s.length]; };
+  const after = (s, from) => { const i = text.indexOf(s, text.indexOf(from)); return [i, i + s.length]; };
+  const spec = [
+    ['Drug', [at('Lipitor')]],
+    ['Disease', [at('high cholesterol')]],
+    ['ADR', [at('pain in my legs')]],
+    ['ADR', [at('pain'), after('arms','pain')]],
+    ['ADR', [at('left knee'), at('stiff')]],
+    ['ADR', [at('left knee'), at('swollen')]],
+    ['ADR', [at('trouble sleeping')]],
+    ['ADR', [at('tired')]],
+    ['ADR', [at('muscle cramps')]]
+  ];
+  loadDoc(text, spec.map(([type,spans],i) => ({id:'T'+(i+1), type, spans})), DEFAULT_TYPES.map(t => ({...t})), 'example.txt');
+  toast('Example loaded');
+}
+
+/* ---------- rendering ---------- */
+function render(){ renderDoc(); renderSelected(); renderTypes(); renderEntities(); renderHeader(); }
+
+function renderHeader(){
+  $('#undo').disabled = !undoStack.length;
+  $('#redo').disabled = !redoStack.length;
+  $('#download').disabled = !state.text;
+  $('#downloadAnn').disabled = !state.text;
+  $('#fname').textContent = state.fileName || '';
+}
+
+function lanes(){
+  const rs = state.entities.map(e => ({id:e.id, a:Math.min(...e.spans.map(s=>s[0])), b:Math.max(...e.spans.map(s=>s[1]))}))
+    .sort((x,y) => x.a - y.a || (y.b - y.a) - (x.b - x.a));
+  const lane = {}, placed = [];
+  for (const r of rs){
+    let L = 0;
+    while (placed.some(p => p.L === L && p.a < r.b && r.a < p.b)) L++;
+    lane[r.id] = L; placed.push({...r, L});
+  }
+  return lane;
+}
+
+function renderDoc(){
+  const doc = $('#doc'), T = state.text, ents = state.entities;
+  if (!T){
+    doc.innerHTML = '<div class="empty"><strong>No document open</strong>Open a .txt file to start annotating, or a .json file to continue an earlier session.</div>';
+    $('#arcs').innerHTML = ''; segEls = []; return;
+  }
+  const lane = lanes();
+  const bset = new Set([0, T.length]);
+  ents.forEach(e => e.spans.forEach(([s,t]) => { bset.add(s); bset.add(t); }));
+  const b = [...bset].sort((x,y) => x-y);
+  const endsAt = {};
+  ents.forEach(e => { const last = Math.max(...e.spans.map(s=>s[1])); (endsAt[last] = endsAt[last] || []).push(e); });
+
+  let html = '';
+  for (let i = 0; i < b.length - 1; i++){
+    const a = b[i], z = b[i+1];
+    const cov = ents.filter(e => e.spans.some(([s,t]) => s <= a && z <= t)).sort((x,y) => lane[x.id] - lane[y.id]);
+    const txt = esc(T.slice(a,z));
+    if (!cov.length){
+      html += `<span class="seg" data-s="${a}" data-e="${z}">${txt}</span>`;
+    } else {
+      const sel = cov.find(e => e.id === selectedId);
+      const top = sel || cov[0];
+      const imgs = [], sizes = [], pos = [];
+      cov.forEach(e => {
+        const c = typeColor(e.type);
+        imgs.push(`linear-gradient(${c},${c})`);
+        sizes.push(`100% ${e.id === selectedId ? 4 : 3}px`);
+        pos.push(`0 calc(100% - ${lane[e.id] * 5}px)`);
+      });
+      const maxL = Math.max(...cov.map(e => lane[e.id]));
+      const style = `background-color:${typeColor(top.type)}${sel ? '55' : '24'};background-image:${imgs.join(',')};` +
+        `background-size:${sizes.join(',')};background-position:${pos.join(',')};background-repeat:no-repeat;padding-bottom:${2 + maxL*5}px`;
+      const title = cov.map(e => `${e.id} ${e.type}: ${entText(e)}`).join('\n');
+      html += `<span class="seg ann" data-s="${a}" data-e="${z}" data-ents="${cov.map(e=>e.id).join(' ')}" style="${style}" title="${escAttr(title)}">${txt}</span>`;
+    }
+    (endsAt[z] || []).forEach(e => {
+      html += `<span class="chip${e.id === selectedId ? ' on' : ''}" contenteditable="false" data-id="${e.id}" style="--c:${typeColor(e.type)}" title="${escAttr(e.id + ' ' + e.type + ': ' + entText(e))}">${esc(e.type)}<sub>${e.id}</sub></span>`;
+    });
+  }
+  doc.innerHTML = html;
+  segEls = [...doc.querySelectorAll('.seg')].map(el => ({el, s:+el.dataset.s, e:+el.dataset.e}));
+  requestAnimationFrame(drawArcs);
+}
+
+function segsIn([s,e]){ return segEls.filter(x => x.s >= s && x.e <= e); }
+function firstRect(sp){ const g = segsIn(sp); return g.length ? g[0].el.getClientRects()[0] : null; }
+function lastRect(sp){ const g = segsIn(sp); if (!g.length) return null; const r = g[g.length-1].el.getClientRects(); return r[r.length-1]; }
+
+function drawArcs(){
+  const svg = $('#arcs'), wrap = $('#docwrap');
+  if (!state.text){ svg.innerHTML = ''; return; }
+  const W = wrap.getBoundingClientRect();
+  svg.setAttribute('width', wrap.scrollWidth); svg.setAttribute('height', wrap.scrollHeight);
+  let back = '', front = '';
+  for (const e of state.entities){
+    if (e.spans.length < 2) continue;
+    const c = typeColor(e.type), hot = e.id === selectedId || e.id === hoverId;
+    const sp = sortSpans(e.spans);
+    for (let i = 0; i < sp.length - 1; i++){
+      const r1 = lastRect(sp[i]), r2 = firstRect(sp[i+1]);
+      if (!r1 || !r2) continue;
+      const x1 = r1.right - W.left - 2, y1 = r1.top - W.top + 4;
+      const x2 = r2.left - W.left + 2, y2 = r2.top - W.top + 4;
+      const h = Math.min(24, 10 + Math.abs(x2 - x1) * 0.06) + (Math.abs(y1 - y2) > 4 ? 6 : 0);
+      const top = Math.min(y1, y2) - h;
+      const path = `<path d="M${x1},${y1} C${x1},${top} ${x2},${top} ${x2},${y2}" fill="none" stroke="${c}" stroke-width="${hot ? 2.4 : 1.4}"${hot ? '' : ' stroke-dasharray="4 3" opacity=".65"'}/>` +
+        `<circle cx="${x1}" cy="${y1}" r="${hot ? 3.2 : 2.2}" fill="${c}"/><circle cx="${x2}" cy="${y2}" r="${hot ? 3.2 : 2.2}" fill="${c}"/>`;
+      if (hot) front += path; else back += path;
+    }
+  }
+  svg.innerHTML = back + front;
+}
+
+function renderSelected(){
+  const p = $('#selPanel'), e = getEnt(selectedId);
+  if (!e){
+    p.innerHTML = `<h2>How to annotate</h2>
+      <p class="hint">Drag across words in the document, then pick a type to create an entity.</p>
+      <p class="hint">To make it discontinuous, keep it selected, drag across the next piece of text and choose <em>Add as fragment</em>.</p>
+      <p class="hint">Click a highlight to edit or delete it. Click again on overlapping text to cycle through the entities there.</p>`;
+    return;
+  }
+  const spans = sortSpans(e.spans), c = typeColor(e.type);
+  p.innerHTML = `<h2><span class="chip on" style="--c:${c}">${esc(e.type)}<sub>${e.id}</sub></span></h2>
+    <div class="ft" style="font-family:var(--read);font-size:1.05rem">${esc(entText(e))}</div>
+    ${e.note ? `<p class="hint">Note: ${esc(e.note)}</p>` : ''}
+    <div class="label">Type</div>
+    <div class="type-btns">${state.types.map(t => `<button class="tbtn${t.name === e.type ? ' on' : ''}" style="--c:${t.color}" data-type="${escAttr(t.name)}" aria-pressed="${t.name === e.type}">${esc(t.name)}</button>`).join('')}</div>
+    <div class="label">Fragments (${spans.length})</div>
+    <div>${spans.map(([s,t],i) => `<div class="frag"><span class="ft">${esc(state.text.slice(s,t))}</span><span class="rng">${s}–${t}</span><button class="x" data-frag="${i}" title="Remove this fragment" aria-label="Remove fragment">✕</button></div>`).join('')}</div>
+    <p class="hint">To add a fragment, drag across more text and choose <em>Add as fragment of ${e.id}</em>.</p>
+    <button class="danger" id="delEnt">Delete ${e.id}</button>
+    <button class="btn" id="deselect" style="margin-left:.4rem">Done</button>`;
+  p.querySelectorAll('.tbtn').forEach(b => b.onclick = () => changeType(e.id, b.dataset.type));
+  p.querySelectorAll('[data-frag]').forEach(b => b.onclick = () => removeFragment(e.id, +b.dataset.frag));
+  $('#delEnt').onclick = () => deleteEntity(e.id);
+  $('#deselect').onclick = () => select(null);
+}
+
+function renderTypes(){
+  $('#types').innerHTML = state.types.map(t => {
+    const n = state.entities.filter(e => e.type === t.name).length;
+    return `<div class="type-row" style="--c:${t.color}"><span class="sw"></span><span>${esc(t.name)}</span><span class="count">${n}</span>` +
+      (n === 0 ? `<button class="x" data-rm="${escAttr(t.name)}" title="Remove type" aria-label="Remove type ${escAttr(t.name)}">✕</button>` : '') + `</div>`;
+  }).join('');
+  $('#types').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => removeType(b.dataset.rm));
+}
+
+function renderEntities(){
+  const list = [...state.entities].sort((a,b) => Math.min(...a.spans.map(s=>s[0])) - Math.min(...b.spans.map(s=>s[0])));
+  $('#entCount').textContent = list.length ? `(${list.length})` : '';
+  $('#ents').innerHTML = list.length ? list.map(e => `<li>
+      <button class="ent-item${e.id === selectedId ? ' on' : ''}" data-id="${e.id}" style="--c:${typeColor(e.type)}">
+        <span class="sw"></span><span class="id">${e.id}</span><span class="txt">${esc(entText(e))}</span></button>
+      <button class="x" data-del="${e.id}" title="Delete ${e.id}" aria-label="Delete ${e.id}">✕</button></li>`).join('')
+    : '<li class="hint">No entities yet.</li>';
+  $('#ents').querySelectorAll('.ent-item').forEach(b => b.onclick = () => { select(b.dataset.id); scrollToEnt(b.dataset.id); });
+  $('#ents').querySelectorAll('[data-del]').forEach(b => b.onclick = () => deleteEntity(b.dataset.del));
+}
+
+function select(id){ selectedId = id; hidePop(); render(); }
+function scrollToEnt(id){
+  const e = getEnt(id); if (!e) return;
+  const g = segsIn(sortSpans(e.spans)[0]);
+  if (g.length) g[0].el.scrollIntoView({block:'center', behavior:'smooth'});
+}
+
+/* ---------- selection to character offsets ---------- */
+function chipPos(chip){
+  let p = chip.previousElementSibling;
+  while (p && !p.classList.contains('seg')) p = p.previousElementSibling;
+  return p ? +p.dataset.e : 0;
+}
+function posOf(node, off){
+  const doc = $('#doc');
+  if (node === doc){
+    const ch = doc.childNodes[off];
+    if (!ch) return state.text.length;
+    if (ch.classList && ch.classList.contains('seg')) return +ch.dataset.s;
+    if (ch.classList && ch.classList.contains('chip')) return chipPos(ch);
+    return null;
+  }
+  const el = node.nodeType === 3 ? node.parentElement : node;
+  const seg = el.closest('.seg');
+  if (seg) return node.nodeType === 3 ? +seg.dataset.s + off : (off === 0 ? +seg.dataset.s : +seg.dataset.e);
+  const chip = el.closest('.chip');
+  return chip ? chipPos(chip) : null;
+}
+function snap(s, e){
+  const T = state.text, isW = ch => /[\p{L}\p{N}'’\-]/u.test(ch || '');
+  const trim = /[\s.,;:!?()"“”]/;
+  while (s < e && trim.test(T[s])) s++;
+  while (e > s && trim.test(T[e-1])) e--;
+  if (e <= s) return [s, s];
+  while (s > 0 && isW(T[s-1]) && isW(T[s])) s--;
+  while (e < T.length && isW(T[e]) && isW(T[e-1])) e++;
+  return [s, e];
+}
+
+/* ---------- selection popup ---------- */
+function showPop(rect){
+  const pop = $('#pop'), [s,e] = pending, sel = getEnt(selectedId);
+  const inside = sel && sel.spans.some(([a,b]) => a <= s && e <= b);
+  pop.innerHTML = `<div class="pv">“${esc(state.text.slice(s,e))}”</div>` +
+    (sel && !inside ? `<button class="addto" id="addTo" style="--c:${typeColor(sel.type)}">Add as fragment of ${sel.id} (${esc(sel.type)})</button>` : '') +
+    `<div class="label" style="margin-top:0">New entity</div>
+     <div class="type-btns">${state.types.map(t => `<button class="tbtn" style="--c:${t.color}" data-type="${escAttr(t.name)}">${esc(t.name)}</button>`).join('')}</div>
+     <button class="cancel" id="popCancel">Cancel</button>`;
+  pop.style.display = 'block';
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let left = Math.min(Math.max(8, rect.left), window.innerWidth - pw - 8);
+  let top = rect.bottom + 10;
+  if (top + ph > window.innerHeight - 8) top = Math.max(8, rect.top - ph - 10);
+  pop.style.left = left + 'px'; pop.style.top = top + 'px';
+  pop.querySelectorAll('.tbtn').forEach(b => b.onclick = () => { const sp = pending; hidePop(); clearSel(); createEntity(b.dataset.type, sp); });
+  const at = $('#addTo');
+  if (at) at.onclick = () => { const sp = pending; hidePop(); clearSel(); addFragment(sel.id, sp); };
+  $('#popCancel').onclick = () => { hidePop(); clearSel(); };
+}
+function hidePop(){ $('#pop').style.display = 'none'; pending = null; }
+function clearSel(){ const s = getSelection(); if (s) s.removeAllRanges(); }
+
+document.addEventListener('mousedown', ev => { if (!$('#pop').contains(ev.target)) hidePop(); });
+document.addEventListener('mouseup', ev => {
+  if ($('#pop').contains(ev.target) || !state.text) return;
+  const sel = getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return;
+  const r = sel.getRangeAt(0);
+  if (!$('#doc').contains(r.commonAncestorContainer)) return;
+  let s = posOf(r.startContainer, r.startOffset), e = posOf(r.endContainer, r.endOffset);
+  if (s == null || e == null) return;
+  if (s > e) [s, e] = [e, s];
+  [s, e] = snap(s, e);
+  if (e <= s) return;
+  pending = [s, e];
+  showPop(r.getBoundingClientRect());
+});
+
+$('#doc').addEventListener('click', ev => {
+  if (!getSelection().isCollapsed || !state.text) return;
+  const chip = ev.target.closest('.chip');
+  if (chip) return select(chip.dataset.id);
+  const seg = ev.target.closest('.seg');
+  if (seg && seg.dataset.ents){
+    const ids = seg.dataset.ents.split(' '), i = ids.indexOf(selectedId);
+    select(ids[(i + 1) % ids.length]);
+  } else if (selectedId) select(null);
+});
+$('#doc').addEventListener('mouseover', ev => {
+  const seg = ev.target.closest('.seg.ann, .chip');
+  let id = null;
+  if (seg){ id = seg.dataset.id || (seg.dataset.ents.split(' ').includes(selectedId) ? selectedId : seg.dataset.ents.split(' ')[0]); }
+  if (id !== hoverId){ hoverId = id; drawArcs(); }
+});
+$('#doc').addEventListener('mouseleave', () => { if (hoverId){ hoverId = null; drawArcs(); } });
+
+/* ---------- wiring ---------- */
+$('#example').onclick = loadExample;
+$('#undo').onclick = undo;
+$('#redo').onclick = redo;
+$('#download').onclick = download;
+$('#downloadAnn').onclick = downloadAnn;
+$('#addType').onclick = () => { addType($('#newType').value, $('#newColor').value); $('#newType').value = ''; $('#newColor').value = PALETTE[state.types.length % PALETTE.length]; };
+document.querySelector('label.btn').addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); $('#file').click(); } });
+document.addEventListener('keydown', ev => {
+  if (ev.target.tagName === 'INPUT') return;
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z' && !ev.shiftKey){ ev.preventDefault(); undo(); }
+  else if ((ev.ctrlKey || ev.metaKey) && (ev.key.toLowerCase() === 'y' || (ev.key.toLowerCase() === 'z' && ev.shiftKey))){ ev.preventDefault(); redo(); }
+  else if (ev.key === 'Escape'){ hidePop(); if (selectedId) select(null); }
+});
+new ResizeObserver(() => drawArcs()).observe($('#docwrap'));
+if (document.fonts) document.fonts.ready.then(drawArcs);
+
+let toastTimer;
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800); }
+
+loadExample();
+</script>
+</body>
+</html>
