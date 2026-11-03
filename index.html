@@ -86,7 +86,8 @@ aside{display:flex;flex-direction:column;gap:1rem}
 
 #pop{position:fixed;z-index:20;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:.7rem;min-width:230px;max-width:330px;box-shadow:0 8px 24px rgba(15,20,32,.18);display:none}
 #pop .pv{font-family:var(--read);font-size:.95rem;margin-bottom:.55rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#pop .addto{width:100%;margin-bottom:.6rem;border:1px solid var(--c);background:var(--c);color:#fff;border-radius:6px;padding:.4rem .6rem;text-align:left}
+#pop .addto{width:100%;border:1px dashed var(--c);background:transparent;color:var(--ink);border-radius:6px;padding:.4rem .6rem;text-align:left}
+#pop .addto:hover{background:var(--c);color:#fff}
 #pop .cancel{margin-top:.55rem;border:none;background:none;color:var(--muted);padding:0;font-size:.85rem}
 
 .metrics{width:100%;border-collapse:collapse;font-size:.88rem;margin:.3rem 0 .6rem}
@@ -187,7 +188,7 @@ function createEntity(type, span){
   commit();
   const id = 'T' + state.nextId++;
   state.entities.push({id, type, spans:[span]});
-  selectedId = id; render(); toast(`Created ${id} (${type})`);
+  selectedId = null; render(); toast(`Created ${id} (${type}). To add another piece, click it first.`);
 }
 function addFragment(id, span){
   const e = getEnt(id); if (!e) return;
@@ -532,7 +533,7 @@ function renderSelected(){
   if (!e){
     p.innerHTML = `<h2>How to annotate</h2>
       <p class="hint">Drag across words in the document, then pick a type to create an entity.</p>
-      <p class="hint">To make it discontinuous, keep it selected, drag across the next piece of text and choose <em>Add as fragment</em>.</p>
+      <p class="hint">To make it discontinuous, click the entity first, then drag across the next piece of text and choose <em>Add as another piece</em>.</p>
       <p class="hint">Click a highlight to edit or delete it. Click again on overlapping text to cycle through the entities there.</p>`;
     return;
   }
@@ -544,7 +545,7 @@ function renderSelected(){
     <div class="type-btns">${state.types.map(t => `<button class="tbtn${t.name === e.type ? ' on' : ''}" style="--c:${t.color}" data-type="${escAttr(t.name)}" aria-pressed="${t.name === e.type}">${esc(t.name)}</button>`).join('')}</div>
     <div class="label">Fragments (${spans.length})</div>
     <div>${spans.map(([s,t],i) => `<div class="frag"><span class="ft">${esc(state.text.slice(s,t))}</span><span class="rng">${s}–${t}</span><button class="x" data-frag="${i}" title="Remove this fragment" aria-label="Remove fragment">✕</button></div>`).join('')}</div>
-    <p class="hint">To add a fragment, drag across more text and choose <em>Add as fragment of ${e.id}</em>.</p>
+    <p class="hint">To add another piece, drag across more text and choose <em>Add as another piece of ${e.id}</em>.</p>
     <button class="danger" id="delEnt">Delete ${e.id}</button>
     <button class="btn" id="deselect" style="margin-left:.4rem">Done</button>`;
   p.querySelectorAll('.tbtn').forEach(b => b.onclick = () => changeType(e.id, b.dataset.type));
@@ -617,11 +618,12 @@ function snap(s, e){
 function showPop(rect){
   const pop = $('#pop'), [s,e] = pending, sel = getEnt(selectedId);
   const inside = sel && sel.spans.some(([a,b]) => a <= s && e <= b);
-  pop.innerHTML = `<div class="pv">“${esc(state.text.slice(s,e))}”</div>` +
-    (sel && !inside ? `<button class="addto" id="addTo" style="--c:${typeColor(sel.type)}">Add as fragment of ${sel.id} (${esc(sel.type)})</button>` : '') +
-    `<div class="label" style="margin-top:0">New entity</div>
-     <div class="type-btns">${state.types.map(t => `<button class="tbtn" style="--c:${t.color}" data-type="${escAttr(t.name)}">${esc(t.name)}</button>`).join('')}</div>
-     <button class="cancel" id="popCancel">Cancel</button>`;
+  pop.innerHTML = `<div class="pv">“${esc(state.text.slice(s,e))}”</div>
+     <div class="label" style="margin-top:0">New entity</div>
+     <div class="type-btns">${state.types.map(t => `<button class="tbtn" style="--c:${t.color}" data-type="${escAttr(t.name)}">${esc(t.name)}</button>`).join('')}</div>` +
+    (sel && !inside ? `<div class="label">or continue ${sel.id} (${esc(entText(sel))})</div>
+     <button class="addto" id="addTo" style="--c:${typeColor(sel.type)}">Add as another piece of ${sel.id} (${esc(sel.type)})</button>` : '') +
+    `<button class="cancel" id="popCancel">Cancel</button>`;
   pop.style.display = 'block';
   const pw = pop.offsetWidth, ph = pop.offsetHeight;
   let left = Math.min(Math.max(8, rect.left), window.innerWidth - pw - 8);
