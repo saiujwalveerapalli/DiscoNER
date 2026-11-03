@@ -89,6 +89,14 @@ aside{display:flex;flex-direction:column;gap:1rem}
 #pop .addto{width:100%;margin-bottom:.6rem;border:1px solid var(--c);background:var(--c);color:#fff;border-radius:6px;padding:.4rem .6rem;text-align:left}
 #pop .cancel{margin-top:.55rem;border:none;background:none;color:var(--muted);padding:0;font-size:.85rem}
 
+.metrics{width:100%;border-collapse:collapse;font-size:.88rem;margin:.3rem 0 .6rem}
+.metrics th,.metrics td{text-align:right;padding:.25rem .3rem;border-bottom:1px solid var(--rule)}
+.metrics th:first-child,.metrics td:first-child{text-align:left}
+.metrics th{font-weight:600;color:var(--muted);font-size:.8rem}
+.diff{list-style:none;margin:0;padding:0;max-height:160px;overflow:auto;font-size:.88rem}
+.diff li{display:flex;gap:.5rem;padding:.2rem 0;align-items:baseline}
+.diff .t{font-family:var(--read)}
+.diff .k{font-size:.75rem;color:var(--muted);flex:none}
 #toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--ink);color:var(--panel);padding:.5rem .9rem;border-radius:6px;font-size:.88rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30}
 #toast.show{opacity:1}
 @media (prefers-reduced-motion:reduce){#toast{transition:none}}
@@ -104,6 +112,7 @@ aside{display:flex;flex-direction:column;gap:1rem}
     <button class="btn" id="redo" title="Redo (Ctrl+Y)">Redo</button>
     <button class="btn" id="download">Download JSON</button>
     <button class="btn" id="downloadAnn" title="Download in BRAT .ann format (same format as CADEC)">Download .ann</button>
+    <label class="btn" tabindex="0" id="goldBtn" title="Score the current annotations against a gold-standard .ann or .json file">Compare with gold<input id="goldFile" type="file" accept=".ann,.json" hidden></label>
   </div>
   <span class="file-name" id="fname"></span>
 </header>
@@ -114,6 +123,7 @@ aside{display:flex;flex-direction:column;gap:1rem}
     <svg id="arcs" aria-hidden="true"></svg>
   </section>
   <aside>
+    <div class="panel" id="evalPanel" hidden></div>
     <div class="panel" id="selPanel"></div>
     <div class="panel">
       <h2>Entity types</h2>
@@ -143,7 +153,7 @@ const PALETTE = ['#d64545','#2f6fde','#8a4fd8','#d9900b','#12937f','#c2418f','#5
 
 let state = {text:'', types:[], entities:[], nextId:1, fileName:''};
 let selectedId = null, hoverId = null, pending = null;
-let undoStack = [], redoStack = [], segEls = [];
+let undoStack = [], redoStack = [], segEls = [], loadedAt = Date.now();
 const $ = s => document.querySelector(s);
 const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const escAttr = s => esc(s).replace(/"/g,'&quot;');
@@ -216,6 +226,7 @@ function loadDoc(text, entities, types, fileName){
   const nums = entities.map(e => parseInt(String(e.id).replace(/\D/g,''),10)).filter(n => !isNaN(n));
   state.nextId = (nums.length ? Math.max(...nums) : 0) + 1;
   selectedId = null; hoverId = null; undoStack = []; redoStack = [];
+  loadedAt = Date.now(); $('#evalPanel').hidden = true;
   render();
 }
 
@@ -363,6 +374,60 @@ function loadExample(){
   ];
   loadDoc(text, spec.map(([type,spans],i) => ({id:'T'+(i+1), type, spans})), DEFAULT_TYPES.map(t => ({...t})), 'example.txt');
   toast('Example loaded');
+}
+
+/* ---------- evaluation against a gold standard ---------- */
+const spanKey = e => normSpans(e.spans).map(([s,t]) => s + '-' + t).join(',');
+const strictKey = e => e.type + '|' + spanKey(e);
+function matchCount(pred, gold, keyFn){
+  const bag = new Map();
+  gold.forEach(g => { const k = keyFn(g); bag.set(k, (bag.get(k) || 0) + 1); });
+  let tp = 0;
+  pred.forEach(p => { const k = keyFn(p), n = bag.get(k) || 0; if (n > 0){ tp++; bag.set(k, n - 1); } });
+  return tp;
+}
+function prf(tp, nPred, nGold){
+  const p = nPred ? tp / nPred : 0, r = nGold ? tp / nGold : 0;
+  return {p, r, f: p + r ? 2*p*r/(p + r) : 0, tp, nPred, nGold};
+}
+function evaluate(pred, gold){
+  const gDisc = gold.filter(g => normSpans(g.spans).length > 1);
+  const pDisc = pred.filter(p => normSpans(p.spans).length > 1);
+  const predKeys = new Set(pred.map(strictKey)), goldKeys = new Set(gold.map(strictKey));
+  return {
+    strict: prf(matchCount(pred, gold, strictKey), pred.length, gold.length),
+    untyped: prf(matchCount(pred, gold, spanKey), pred.length, gold.length),
+    disc: prf(matchCount(pDisc, gDisc, strictKey), pDisc.length, gDisc.length),
+    missed: gold.filter(g => !predKeys.has(strictKey(g))),
+    extra: pred.filter(p => !goldKeys.has(strictKey(p))),
+    seconds: Math.round((Date.now() - loadedAt) / 1000)
+  };
+}
+function showEval(res, goldName){
+  const pct = x => (x * 100).toFixed(1) + '%';
+  const row = (name, m) => `<tr><td>${name}</td><td>${m.nPred ? pct(m.p) : 'n/a'}</td><td>${m.nGold ? pct(m.r) : 'n/a'}</td><td>${m.nPred || m.nGold ? pct(m.f) : 'n/a'}</td><td>${m.tp}/${m.nGold}</td></tr>`;
+  const item = e => `<li><span class="k">${esc(e.type)}</span><span class="t">${esc(entText(e))}</span></li>`;
+  const mins = Math.floor(res.seconds / 60), secs = res.seconds % 60;
+  const p = $('#evalPanel');
+  p.innerHTML = `<h2>Compared with gold <small>${esc(goldName)}</small></h2>
+    <table class="metrics"><tr><th></th><th>Precision</th><th>Recall</th><th>F1</th><th>Matched</th></tr>
+      ${row('Strict', res.strict)}${row('Ignoring type', res.untyped)}${row('Discontinuous', res.disc)}</table>
+    <p class="hint">Strict means the type and every fragment match exactly. Time on this document: <strong>${mins}m ${secs}s</strong>.</p>
+    <div class="label">Missed gold entities (${res.missed.length})</div>
+    <ul class="diff">${res.missed.map(item).join('') || '<li class="hint">None</li>'}</ul>
+    <div class="label">Extra entities not in gold (${res.extra.length})</div>
+    <ul class="diff">${res.extra.map(item).join('') || '<li class="hint">None</li>'}</ul>
+    <button class="btn" id="evalCopy" style="margin-top:.7rem">Copy results</button>
+    <button class="btn" id="evalClose" style="margin-top:.7rem;margin-left:.3rem">Close</button>`;
+  p.hidden = false;
+  p.scrollIntoView({block:'nearest', behavior:'smooth'});
+  $('#evalClose').onclick = () => { p.hidden = true; };
+  $('#evalCopy').onclick = () => {
+    const head = 'file\tgold\tseconds\tstrict_p\tstrict_r\tstrict_f1\tuntyped_p\tuntyped_r\tuntyped_f1\tdisc_p\tdisc_r\tdisc_f1';
+    const line = [state.fileName, goldName, res.seconds, ...['strict','untyped','disc'].flatMap(k => [res[k].p, res[k].r, res[k].f].map(x => x.toFixed(4)))].join('\t');
+    navigator.clipboard.writeText(head + '\n' + line).then(() => toast('Results copied, paste them into a spreadsheet'), () => toast('Could not copy'));
+  };
+  toast(`Strict F1 ${pct(res.strict.f)}`);
 }
 
 /* ---------- rendering ---------- */
@@ -611,6 +676,21 @@ $('#undo').onclick = undo;
 $('#redo').onclick = redo;
 $('#download').onclick = download;
 $('#downloadAnn').onclick = downloadAnn;
+$('#goldFile').addEventListener('change', async ev => {
+  const f = ev.target.files[0]; ev.target.value = '';
+  if (!f) return;
+  if (!state.text) return toast('Open a document first, then compare it with its gold file');
+  try {
+    let gold;
+    if (/\.json$/i.test(f.name)){
+      const d = parseJSONDoc(JSON.parse(await f.text()));
+      if (d.text !== state.text) return toast('The gold JSON is for a different document text');
+      gold = d.entities;
+    } else gold = parseBrat(state.text, await f.text()).entities;
+    showEval(evaluate(state.entities, gold), f.name);
+  } catch (err){ toast(err instanceof SyntaxError ? 'That file is not valid JSON' : err.message); }
+});
+$('#goldBtn').addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); $('#goldFile').click(); } });
 $('#addType').onclick = () => { addType($('#newType').value, $('#newColor').value); $('#newType').value = ''; $('#newColor').value = PALETTE[state.types.length % PALETTE.length]; };
 document.querySelector('label.btn').addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); $('#file').click(); } });
 document.addEventListener('keydown', ev => {
